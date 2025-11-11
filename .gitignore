@@ -1,0 +1,6 @@
+__pycache__/
+outputs/
+*.pyc
+venv/
+env/
+coverage/
