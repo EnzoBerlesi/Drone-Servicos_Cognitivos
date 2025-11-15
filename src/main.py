@@ -22,7 +22,20 @@ def main():
     import csv
     with open(outpath, 'w', newline='', encoding='utf-8') as f:
         w = csv.writer(f)
-        w.writerow(['cep_ini','lat_ini','lon_ini','dia','hora_ini','vel','cep_fim','lat_fim','lon_fim','pouso','hora_fim'])
+        # Header exactly as specified in the enunciado
+        w.writerow([
+            'CEP inicial',
+            'Latitude inicial',
+            'Longitude inicial',
+            'Dia do voo',
+            'Hora inicial',
+            'Velocidade',
+            'CEP final',
+            'Latitude final',
+            'Longitude final',
+            'Pouso',
+            'Hora final'
+        ])
         for s in segs:
             w.writerow(s.to_csv_row())
     print('Wrote', outpath)

@@ -26,25 +26,68 @@ pytest --maxfail=1 -q
 # coverage run -m pytest && coverage report -m
 ```
 
-Assunções relevantes
---------------------
-- A tabela real de ventos não foi fornecida pelo enunciado; incluímos uma tabela de exemplo em `data/wind_table.csv`. O AG usa essa tabela por dia/hora para calcular a componente do vento na direção do voo.
-- Consumo de bateria: referência dada (36 km/h => 5000 s de autonomia) é tratada como autonomia em segundos, ajustada por fator 0.93 (Curitiba). A autonomia efetiva = 5000 * 0.93 = 4650 s.
-- Consumo por parada: cada parada consome 72 s de autonomia (dec/acc/operacões). Paradas para recarga também consomem esses 72 s antes de recarregar.
-- Tempo de recarga (para voltar a 100%): assumido 30 minutos (1800 s). Essa suposição está documentada e pode ser alterada em `src/utils.py`.
-- Fotos só podem ser tiradas entre 06:00 e 19:00. Se chegada a um CEP ocorrer fora dessa janela, o leg é adiado até o próximo período de dia.
+# Surveyor — Planejamento de rotas de drone (Trabalho 2)
 
-Arquivos principais
+Projeto para o Trabalho 2 — AG que gera um plano de voo para um drone fotografar uma lista de CEPs e retornar à base.
+
+Visão rápida
+------------
+- O AG otimiza a ordem de visita, velocidades por trecho e horário de início.
+- O simulador modela autonomia (em segundos), custos de parada, recargas e janela diária de operação (06:00–19:00).
+- Gera um CSV (`outputs/flight_plan.csv`) com o plano de voo seguindo o formato do enunciado.
+
+Instalação e execução (Windows / PowerShell)
+-------------------------------------------
+1. Ative a virtualenv do projeto (se existir `.venv`):
+
+```powershell
+& "C:/Users/enzol/OneDrive/Área de Trabalho/Drone/.venv/Scripts/Activate.ps1"
+```
+
+2. Instale dependências (caso necessário):
+
+```powershell
+& "C:/Users/enzol/OneDrive/Área de Trabalho/Drone/.venv/Scripts/python.exe" -m pip install -r requirements.txt
+```
+
+3. Rodar os testes:
+
+```powershell
+& "C:/Users/enzol/OneDrive/Área de Trabalho/Drone/.venv/Scripts/python.exe" -m pytest -q
+```
+
+4. Gerar um `flight_plan.csv` (modo demo):
+
+```powershell
+& "C:/Users/enzol/OneDrive/Área de Trabalho/Drone/.venv/Scripts/python.exe" -m src.main
+```
+
+Formato de saída (CSV)
+----------------------
+O CSV de saída segue o cabeçalho exigido no enunciado (ordem e rótulos):
+
+`CEP inicial, Latitude inicial, Longitude inicial, Dia do voo, Hora inicial, Velocidade, CEP final, Latitude final, Longitude final, Pouso, Hora final`
+
+Comportamentos importantes
+-------------------------
+- Velocidades geradas pelo AG são quantizadas em múltiplos de 4 km/h (4..96).
+- Regras específicas de matrícula (ex.: matrícula iniciada por '2') são consideradas pelo simulador quando informado.
+- Se quiser que o runner (`src/main.py`) aceite matrícula ou outros parâmetros, posso adicionar argumentos de linha de comando.
+
+Estrutura principal
 -------------------
-- `src/ga.py` — Algoritmo Genético
-- `src/drone.py` — Simulação do drone e geração das linhas do CSV
-- `src/utils.py` — funções utilitárias (Haversine, velocidade com vento, manipulação de tempo)
-- `src/main.py` — runner que carrega dados, executa o AG e escreve `outputs/flight_plan.csv`
+- `src/ga.py` — Algoritmo Genético (população, crossover, mutação, fitness)
+- `src/drone.py` — Simulador: `DroneSimulator`, `FlightSegment` e geração do CSV
+- `src/utils.py` — utilitários (haversine, vento, janelas de tempo, constantes)
+- `data/` — `ceps.csv` e `wind_table.csv` (dados de entrada)
+- `tests/` — suíte de testes (unitários e integrais)
 
-Notas de avaliação
-------------------
-O repositório contém testes unitários em `tests/` — existem pelo menos 3 testes cobrindo Haversine, cálculo de consumo e validade de rota. A cobertura pode ser gerada localmente com `coverage`.
+Próximos passos que posso implementar
+------------------------------------
+- Adicionar argumentos CLI a `src/main.py` (por exemplo `--matricula`).
+- Incluir GitHub Actions para rodar testes automaticamente em PRs.
+- Acrescentar mais testes específicos (CSV header validado a partir da execução de `main`, regras detalhadas de matrícula, quantização estrita em todas fases).
 
 Contato
 -------
-Identificação dos integrantes: [Coloque aqui os nomes completos e RA/ID de cada integrante antes da entrega final]
+Coloque aqui os nomes do(s) integrante(s) antes da entrega final.
