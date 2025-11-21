@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from .utils import load_ceps, load_wind_table
 from .ga import GeneticOptimizer
 
@@ -14,8 +14,8 @@ def main():
     print('Best sequence score', score)
     # simulate and write CSV
     sim = ga.sim
-    start = datetime(2025,11,1,6,0,0)
-    segs, summary = sim.simulate_route(best, start, speed_kmh=36.0)
+    start = datetime(2025, 11, 1, best['start_hour'], 0, 0) + timedelta(days=best['start_day'] - 1)
+    segs, summary = sim.simulate_route(best['order'], start, speeds=best['speeds'])
     outdir = os.path.join(os.path.dirname(__file__), '..', 'outputs')
     os.makedirs(outdir, exist_ok=True)
     outpath = os.path.join(outdir, 'flight_plan.csv')

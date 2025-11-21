@@ -5,15 +5,62 @@ import os
 
 # Constants
 MAX_SPEED_KMH = 96.0
+# Velocidade mínima: 10 m/s = 36 km/h (conforme especificação do PDF)
+MIN_SPEED_KMH = 36.0
 REF_SPEED_KMH = 36.0
-REF_AUTONOMY_S = 5000.0
+# Velocidades reguladas: múltiplos de 4 km/h, mínimo 36 km/h
+SPEED_STEP = 4.0
+VALID_SPEEDS = list(range(36, 97, 4))  # [36, 40, 44, 48, ..., 96]
+# Autonomia nominal em laboratório (20°C, sem vento) conforme especificação do PDF
+NOMINAL_AUTONOMY_S = 5000.0
+# Fator de correção para Curitiba (aplicado sobre a autonomia calculada pela fórmula)
 CURITIBA_FACTOR = 0.93
 STOP_AUTONOMY_COST_S = 72.0
-RECHARGE_DURATION_S = 1800.0  # assumption: 30 minutes to recharge to full
+RECHARGE_DURATION_S = 1800.0  # 30 minutes to recharge to full
 
-AUTONOMY_S = REF_AUTONOMY_S * CURITIBA_FACTOR
+# Autonomia base para cálculos (será ajustada pela velocidade usando a fórmula)
+# A fórmula é: A(v) = 5000 * (36/v)²
+# Para Curitiba: A(v) = 5000 * (36/v)² * 0.93
+def get_autonomy_for_speed(speed_kmh):
+    """
+    Calcula autonomia em segundos para uma dada velocidade.
+    Fórmula: A(v) = NOMINAL_AUTONOMY_S * (REF_SPEED_KMH / v)² * CURITIBA_FACTOR
+    
+    Onde:
+    - NOMINAL_AUTONOMY_S = 5000s (autonomia nominal em laboratório a 20°C, sem vento)
+    - REF_SPEED_KMH = 36 km/h (velocidade de referência)
+    - CURITIBA_FACTOR = 0.93 (fator de correção para condições de Curitiba)
+    """
+    if speed_kmh <= 0:
+        return 0
+    return NOMINAL_AUTONOMY_S * (REF_SPEED_KMH / speed_kmh) ** 2 * CURITIBA_FACTOR
+
+# Autonomia padrão (quando velocidade = 36 km/h)
+AUTONOMY_S = get_autonomy_for_speed(REF_SPEED_KMH)
 
 HOME_CEP = "82821020"
+
+def validate_speed(speed_kmh):
+    """
+    Valida e ajusta velocidade conforme regras do PDF:
+    - Deve ser múltiplo de 4 km/h
+    - Mínimo 36 km/h (10 m/s)
+    - Máximo 96 km/h
+    
+    Retorna a velocidade válida mais próxima.
+    """
+    # Arredondar para o múltiplo de 4 mais próximo
+    speed_kmh = round(speed_kmh / SPEED_STEP) * SPEED_STEP
+    # Aplicar limites
+    speed_kmh = max(MIN_SPEED_KMH, min(MAX_SPEED_KMH, speed_kmh))
+    return speed_kmh
+
+def get_valid_speeds():
+    """
+    Retorna lista de todas as velocidades válidas.
+    Velocidades: 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96 km/h
+    """
+    return VALID_SPEEDS.copy()
 
 def haversine_km(lat1, lon1, lat2, lon2):
     # returns distance in km
@@ -77,20 +124,56 @@ def bearing_deg(lat1, lon1, lat2, lon2):
     return (bearing + 360) % 360
 
 def wind_component_along_course(wind_kmh, wind_dir_deg, course_deg):
-    # positive if tailwind (increasing ground speed), negative if headwind
-    # Convert both to unit vectors and take dot product
+    """
+    DEPRECATED: Esta função calculava apenas a projeção do vento.
+    Use effective_speed_kmh_vectorial para cálculo correto com soma vetorial.
+    
+    Retorna a componente do vento ao longo do curso (projeção).
+    Positivo se vento de cauda (tailwind), negativo se vento de frente (headwind).
+    """
     wx, wy = unit_vector_from_bearing(wind_dir_deg)
     cx, cy = unit_vector_from_bearing(course_deg)
-    # wind component magnitude along course = wind_speed * dot
     dot = wx*cx + wy*cy
     return wind_kmh * dot
 
-def effective_speed_kmh(requested_speed_kmh, wind_comp_kmh):
-    # effective ground speed cannot be negative; cap min small positive
-    s = requested_speed_kmh + wind_comp_kmh
-    # cap to physical max speed (before wind adjustment limit)
-    s = max(1e-3, min(s, MAX_SPEED_KMH))
-    return s
+def effective_speed_kmh(requested_speed_kmh, wind_kmh, wind_dir_deg, course_deg):
+    """
+    Calcula velocidade efetiva no solo (ground speed) usando soma vetorial.
+    
+    Args:
+        requested_speed_kmh: Velocidade do ar do drone (airspeed)
+        wind_kmh: Magnitude do vento
+        wind_dir_deg: Direção para onde o vento sopra (bearing em graus do Norte)
+        course_deg: Direção do curso do drone (bearing em graus do Norte)
+    
+    Returns:
+        Velocidade efetiva no solo em km/h
+    
+    Método:
+        1. Calcula componentes do vetor velocidade do drone no ar
+        2. Calcula componentes do vetor vento
+        3. Soma vetorialmente: v_ground = v_drone + v_wind
+        4. Retorna magnitude do vetor resultante
+    """
+    import math
+    
+    # Componentes da velocidade do drone (no ar)
+    v_drone_x = requested_speed_kmh * math.sin(math.radians(course_deg))
+    v_drone_y = requested_speed_kmh * math.cos(math.radians(course_deg))
+    
+    # Componentes do vento
+    v_wind_x = wind_kmh * math.sin(math.radians(wind_dir_deg))
+    v_wind_y = wind_kmh * math.cos(math.radians(wind_dir_deg))
+    
+    # Soma vetorial: velocidade no solo (ground speed)
+    v_ground_x = v_drone_x + v_wind_x
+    v_ground_y = v_drone_y + v_wind_y
+    
+    # Magnitude do vetor resultante
+    ground_speed = math.sqrt(v_ground_x**2 + v_ground_y**2)
+    
+    # Garantir que a velocidade não seja negativa
+    return max(1e-3, ground_speed)
 
 def seconds_for_distance_km(distance_km, speed_kmh):
     # time in seconds

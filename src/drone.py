@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from .utils import haversine_km, bearing_deg, load_wind_table, wind_component_along_course, effective_speed_kmh, seconds_for_distance_km, STOP_AUTONOMY_COST_S, AUTONOMY_S, RECHARGE_DURATION_S, clamp_to_day_window, ensure_within_7_days, HOME_CEP
+from .utils import haversine_km, bearing_deg, load_wind_table, effective_speed_kmh, seconds_for_distance_km, STOP_AUTONOMY_COST_S, AUTONOMY_S, RECHARGE_DURATION_S, clamp_to_day_window, ensure_within_7_days, HOME_CEP, validate_speed, MIN_SPEED_KMH
 
 class FlightSegment:
     def __init__(self, cep_from, lat_from, lon_from, start_dt, speed_set_kmh, cep_to, lat_to, lon_to, landed, end_dt):
@@ -42,11 +42,9 @@ class DroneSimulator:
         self.matricula = matricula or ''
         # Whether to apply the R$80 late-landing fee (configurable per run/group)
         # If matricula starts with '2', rules apply automatically
-        self.apply_late_fee = self.matricula.startswith('2')
+        self.apply_late_fee = True  # Conforme PDF: R$80 adicional se pousar após 17:00
         # whether to enable matricula-specific rounding/min speed rules
         self.matricula_rules = self.matricula.startswith('2')
-        # Whether to apply the R$80 late-landing fee (configurable per run/group)
-        self.apply_late_fee = False
 
     def simulate_route(self, order, start_dt, speed_kmh=36.0, speeds=None):
         """Simulate given order (list of cep strings). Returns list of FlightSegment and summary costs.
@@ -85,13 +83,13 @@ class DroneSimulator:
             day = curr_dt.day - (datetime(2025,11,1).day - 1)
             hour = curr_dt.hour
             wind_kmh, wind_dir = self.wind.get((day, hour), (0.0, 0.0))
-            wind_comp = wind_component_along_course(wind_kmh, wind_dir, course)
             # choose speed for this leg
             set_speed = speeds_used[i]
-            # enforce matricula minimum speed (10 m/s -> 36 km/h)
-            if self.matricula_rules:
-                set_speed = max(set_speed, 36.0)
-            eff_speed = effective_speed_kmh(set_speed, wind_comp)
+            # Validar e garantir que a velocidade está dentro das especificações
+            # Mínimo 36 km/h (10 m/s), múltiplos de 4 km/h
+            set_speed = validate_speed(set_speed)
+            # Calcular velocidade efetiva no solo usando soma vetorial
+            eff_speed = effective_speed_kmh(set_speed, wind_kmh, wind_dir, course)
             flight_time_s = seconds_for_distance_km(dist, eff_speed)
             # if matricula rules apply, round up seconds
             if self.matricula_rules:
@@ -106,6 +104,8 @@ class DroneSimulator:
                 # perform recharge (land)
                 landed = True
                 stops_count += 1
+                # Custo de pouso: R$80 por pouso para recarga (conforme PDF)
+                total_money_cost += 80.0
                 # time for landing operations reduces battery (cost) before recharge
                 remaining_battery_s -= STOP_AUTONOMY_COST_S
                 # recharge takes time but restores battery to full

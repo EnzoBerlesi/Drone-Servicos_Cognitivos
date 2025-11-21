@@ -4,3 +4,4 @@ outputs/
 venv/
 env/
 coverage/
+images/

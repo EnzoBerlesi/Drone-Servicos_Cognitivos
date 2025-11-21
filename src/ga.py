@@ -2,7 +2,7 @@ import random
 import math
 from copy import deepcopy
 from .drone import DroneSimulator
-from .utils import load_wind_table, load_ceps, AUTONOMY_S
+from .utils import load_wind_table, load_ceps, AUTONOMY_S, get_valid_speeds
 from datetime import datetime, timedelta
 
 class GeneticOptimizer:
@@ -25,8 +25,10 @@ class GeneticOptimizer:
         for _ in range(self.pop_size):
             seq = ceplist[:]
             random.shuffle(seq)
-            # speeds per leg: multiples of 4 between 4 and 96
-            speeds = [random.choice(range(4, 97, 4)) for _ in range(legs)]
+            # speeds per leg: múltiplos de 4 entre 36 e 96 km/h (conforme PDF)
+            # Velocidades válidas: 36, 40, 44, 48, 52, 56, 60, 64, 68, 72, 76, 80, 84, 88, 92, 96
+            valid_speeds = get_valid_speeds()
+            speeds = [random.choice(valid_speeds) for _ in range(legs)]
             # start day/hour (day 1..7, hour 6..19)
             start_day = random.randint(1, 7)
             start_hour = random.randint(6, 19)
@@ -85,10 +87,11 @@ class GeneticOptimizer:
         if random.random() < self.mut_rate:
             i, j = random.sample(range(len(individual['order'])), 2)
             individual['order'][i], individual['order'][j] = individual['order'][j], individual['order'][i]
-        # speeds mutation: randomly change one speed to another multiple of 4
+        # speeds mutation: randomly change one speed to another múltiplo de 4 válido (36-96)
         if random.random() < self.mut_rate:
             idx = random.randrange(len(individual['speeds']))
-            individual['speeds'][idx] = random.choice(range(4, 97, 4))
+            valid_speeds = get_valid_speeds()
+            individual['speeds'][idx] = random.choice(valid_speeds)
         # start mutation
         if random.random() < self.mut_rate * 0.5:
             individual['start_day'] = random.randint(1, 7)
