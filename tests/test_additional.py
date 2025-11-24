@@ -26,7 +26,8 @@ def test_route_exceeds_7_days_invalid(monkeypatch):
 
     ceps = load_ceps('data/ceps.csv')
     wind = load_wind_table('data/wind_table.csv')
-    sim = DroneSimulator(ceps, wind)
+    # Desabilitar autonomia variável para que o monkeypatch funcione
+    sim = DroneSimulator(ceps, wind, use_variable_autonomy=False)
     start = datetime(2025, 11, 1, 6, 0, 0)
     order = [c['cep'] for c in ceps if c['cep'] != '82821020'][:1]
     segs, summary = sim.simulate_route(order, start)
@@ -40,7 +41,8 @@ def test_late_landing_fee_applied(monkeypatch):
 
     ceps = load_ceps('data/ceps.csv')
     wind = load_wind_table('data/wind_table.csv')
-    sim = DroneSimulator(ceps, wind)
+    # Desabilitar autonomia variável para que o monkeypatch funcione
+    sim = DroneSimulator(ceps, wind, use_variable_autonomy=False)
     # enable fee behavior explicitly
     sim.apply_late_fee = True
 

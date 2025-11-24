@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from .utils import haversine_km, bearing_deg, load_wind_table, effective_speed_kmh, seconds_for_distance_km, STOP_AUTONOMY_COST_S, AUTONOMY_S, RECHARGE_DURATION_S, clamp_to_day_window, ensure_within_7_days, HOME_CEP, validate_speed, MIN_SPEED_KMH
+from .utils import haversine_km, bearing_deg, load_wind_table, effective_speed_kmh, seconds_for_distance_km, STOP_AUTONOMY_COST_S, AUTONOMY_S, RECHARGE_DURATION_S, clamp_to_day_window, ensure_within_7_days, HOME_CEP, validate_speed, MIN_SPEED_KMH, get_autonomy_for_speed
 
 class FlightSegment:
     def __init__(self, cep_from, lat_from, lon_from, start_dt, speed_set_kmh, cep_to, lat_to, lon_to, landed, end_dt):
@@ -34,7 +34,7 @@ class FlightSegment:
         ]
 
 class DroneSimulator:
-    def __init__(self, ceps, wind_table, matricula: str = None):
+    def __init__(self, ceps, wind_table, matricula: str = None, use_variable_autonomy: bool = True):
         # ceps: list of dict with cep, lat, lon
         self.ceps = {c['cep']: c for c in ceps}
         self.order = []
@@ -45,6 +45,8 @@ class DroneSimulator:
         self.apply_late_fee = True  # Conforme PDF: R$80 adicional se pousar após 17:00
         # whether to enable matricula-specific rounding/min speed rules
         self.matricula_rules = self.matricula.startswith('2')
+        # Flag para usar autonomia variável com velocidade (True) ou autonomia fixa AUTONOMY_S (False para testes)
+        self.use_variable_autonomy = use_variable_autonomy
 
     def simulate_route(self, order, start_dt, speed_kmh=36.0, speeds=None):
         """Simulate given order (list of cep strings). Returns list of FlightSegment and summary costs.
@@ -53,7 +55,8 @@ class DroneSimulator:
         speed_kmh: nominal speed to set for each leg (will be adjusted by wind)
         """
         segments = []
-        remaining_battery_s = AUTONOMY_S
+        # CORREÇÃO CRÍTICA: Autonomia inicial deve ser calculada para a primeira velocidade,
+        # não usar AUTONOMY_S fixo (que é apenas para v=36 km/h)
         curr = HOME_CEP
         curr_dt = clamp_to_day_window(start_dt)
         total_money_cost = 0.0
@@ -73,13 +76,22 @@ class DroneSimulator:
                 speeds_used += [speed_kmh] * ((len(full_route) - 1) - len(speeds_used))
             elif len(speeds_used) > len(full_route) - 1:
                 speeds_used = speeds_used[:len(full_route) - 1]
+        
+        # Inicializar bateria com autonomia da primeira velocidade
+        first_speed = validate_speed(speeds_used[0]) if speeds_used else speed_kmh
+        if self.use_variable_autonomy:
+            remaining_battery_s = get_autonomy_for_speed(first_speed)
+        else:
+            # Modo de compatibilidade com testes (usar AUTONOMY_S fixo)
+            remaining_battery_s = AUTONOMY_S
 
         for i in range(len(full_route)-1):
             a = self.ceps[full_route[i]]
             b = self.ceps[full_route[i+1]]
             dist = haversine_km(a['lat'], a['lon'], b['lat'], b['lon'])
             course = bearing_deg(a['lat'], a['lon'], b['lat'], b['lon'])
-            # get wind for current day/hour
+            # CORREÇÃO: get wind for current day/hour de PARTIDA (não durante voo)
+            # O vento é fixo durante todo o trajeto baseado na hora de saída
             day = curr_dt.day - (datetime(2025,11,1).day - 1)
             hour = curr_dt.hour
             wind_kmh, wind_dir = self.wind.get((day, hour), (0.0, 0.0))
@@ -99,18 +111,29 @@ class DroneSimulator:
             # check battery
             need_battery = flight_time_s + STOP_AUTONOMY_COST_S
             landed = False
+            landing_time = None  # Hora do pouso (para verificar taxa de atraso)
             # if not enough battery, recharge at current location
             if need_battery > remaining_battery_s:
                 # perform recharge (land)
                 landed = True
                 stops_count += 1
+                # Registrar hora do pouso (ANTES da recarga e do voo)
+                landing_time = curr_dt
                 # Custo de pouso: R$80 por pouso para recarga (conforme PDF)
                 total_money_cost += 80.0
+                # CORREÇÃO: Aplicar taxa de atraso AQUI, baseado na hora do pouso
+                if landing_time.hour >= 17 and self.apply_late_fee:
+                    total_money_cost += 80.0  # R$80 adicional por pouso após 17:00
                 # time for landing operations reduces battery (cost) before recharge
                 remaining_battery_s -= STOP_AUTONOMY_COST_S
                 # recharge takes time but restores battery to full
                 curr_dt += timedelta(seconds=RECHARGE_DURATION_S)
-                remaining_battery_s = AUTONOMY_S
+                # CORREÇÃO CRÍTICA: Autonomia após recarga deve ser baseada na velocidade atual
+                if self.use_variable_autonomy:
+                    remaining_battery_s = get_autonomy_for_speed(set_speed)
+                else:
+                    # Modo de compatibilidade com testes (usar AUTONOMY_S fixo)
+                    remaining_battery_s = AUTONOMY_S
             # perform flight
             curr_dt += timedelta(seconds=flight_time_s)
             remaining_battery_s -= flight_time_s
@@ -121,9 +144,6 @@ class DroneSimulator:
             # photo stop consumes autonomy seconds (but cannot drop below 0)
             remaining_battery_s -= STOP_AUTONOMY_COST_S
             total_time_s += flight_time_s + STOP_AUTONOMY_COST_S
-            # if this was a recharge landing and happened after 17:00 -> cost
-            if landed and curr_dt.hour >= 17 and self.apply_late_fee:
-                total_money_cost += 80.0
             # Build segment
             seg = FlightSegment(
                 a['cep'], a['lat'], a['lon'], curr_dt - timedelta(seconds=flight_time_s + STOP_AUTONOMY_COST_S),

@@ -109,6 +109,12 @@ class GeneticOptimizer:
                 if sc > best_score:
                     best = deepcopy(ind)
                     best_score = sc
+            
+            # Mostrar progresso a cada 20 geracoes
+            if (g + 1) % 20 == 0 or g == 0:
+                avg_score = sum(scores) / len(scores)
+                print(f"Geracao {g+1:3d}/{self.generations}: Melhor score = {best_score:.8f}, Media = {avg_score:.8f}")
+            
             # selection
             selected = self.select(pop, scores)
             # create next generation
