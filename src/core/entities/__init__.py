@@ -1,0 +1,1 @@
+"""Entidades básicas do sistema"""

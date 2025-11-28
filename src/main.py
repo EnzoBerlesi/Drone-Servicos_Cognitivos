@@ -1,64 +1,168 @@
+"""
+Ponto de entrada principal do sistema de otimização de rotas de drone
+"""
 import os
-from datetime import datetime, timedelta
-from .utils import load_ceps, load_wind_table
-from .ga import GeneticOptimizer
+import sys
+import random
 
-DATA_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
-DATA_DIR = os.path.abspath(DATA_DIR)
+# Adicionar diretório raiz ao path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.utils_custom.file_handlers import carregar_coordenadas
+from src.core.entities.drone import Drone
+from src.core.entities.vento import GerenciadorVento
+from src.core.populacao import Populacao
+from src.algorithms.genetico import AlgoritmoGenetico
+from src.simulation.csv_exporter import CSVExporter
+from src.utils_custom.calculos import distancia_haversine
+
+def calcular_distancia_total(coordenadas):
+    """Calcula distância total de uma rota"""
+    return sum(
+        distancia_haversine(
+            coordenadas[i].latitude, coordenadas[i].longitude,
+            coordenadas[i+1].latitude, coordenadas[i+1].longitude
+        )
+        for i in range(len(coordenadas) - 1)
+    )
+
+def aplicar_2opt(coordenadas, max_iter=1000):
+    """Aplica otimização 2-opt à rota"""
+    n = len(coordenadas)
+    if n < 4:
+        return coordenadas
+    
+    improved = True
+    it = 0
+    
+    while improved and it < max_iter:
+        improved = False
+        it += 1
+        
+        if it % 100 == 0:
+            print(f"      2-opt: iteracao {it}/{max_iter} ({it*100//max_iter}%)")
+        
+        for i in range(1, n - 2):
+            for j in range(i + 1, n - 1):
+                a, b = coordenadas[i - 1], coordenadas[i]
+                c, d = coordenadas[j], coordenadas[j + 1]
+                
+                delta = (
+                    distancia_haversine(a.latitude, a.longitude, c.latitude, c.longitude) +
+                    distancia_haversine(b.latitude, b.longitude, d.latitude, d.longitude) -
+                    distancia_haversine(a.latitude, a.longitude, b.latitude, b.longitude) -
+                    distancia_haversine(c.latitude, c.longitude, d.latitude, d.longitude)
+                )
+                
+                if delta < -1e-6:
+                    # Reverter segmento
+                    coordenadas[i:j+1] = list(reversed(coordenadas[i:j+1]))
+                    improved = True
+                    break
+            
+            if improved:
+                break
+    
+    print(f"      2-opt: iteracao {it}/{max_iter} (100%)")
+    return coordenadas
 
 def main():
-    ceps = load_ceps(os.path.join(DATA_DIR, 'ceps.csv'))
-    wind = load_wind_table(os.path.join(DATA_DIR, 'wind_table.csv'))
+    """Função principal que executa a otimização"""
+    print("=" * 70)
+    print("SISTEMA DE OTIMIZACAO DE ROTAS DE DRONE - UNIBRASIL SURVEYOR")
+    print("=" * 70)
     
-    print("Iniciando otimizacao com Algoritmo Genetico...")
-    print("Parametros: pop_size=50, generations=200, elite=2, mut_rate=0.15")
-    print("-" * 80)
+    # Configurações - usar caminho absoluto baseado na raiz do projeto
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ARQUIVO_COORDENADAS = os.path.join(BASE_DIR, "data", "coordenadas.csv")
+    TAMANHO_POPULACAO = 50
+    NUMERO_GERACOES = 10
     
-    # Executar AG com parametros otimizados para melhor qualidade da solucao
-    ga = GeneticOptimizer(ceps, wind, pop_size=50, generations=200, elite=2, mut_rate=0.15)
-    best, score = ga.run()
+    # Carregar dados
+    print(f"\nCarregando coordenadas...")
+    coordenadas = carregar_coordenadas(ARQUIVO_COORDENADAS)
     
-    print("-" * 80)
-    print(f'Melhor solucao encontrada - Score: {score:.10f}')
-    print(f'Ordem de visitacao: {len(best["order"])} CEPs')
-    # Simular e gerar CSV da melhor solucao
-    sim = ga.sim
-    start = datetime(2025, 11, 1, best['start_hour'], 0, 0) + timedelta(days=best['start_day'] - 1)
-    segs, summary = sim.simulate_route(best['order'], start, speeds=best['speeds'])
+    if not coordenadas:
+        print("ERRO: Nenhuma coordenada foi carregada.")
+        return
     
-    print(f'Dia de inicio: {best["start_day"]}, Hora: {best["start_hour"]:02d}:00')
-    print(f'Tempo total: {summary["total_time_s"]/3600:.2f} horas')
-    print(f'Pousos para recarga: {summary["stops"]}')
-    print(f'Custo monetario: R$ {summary["money"]:.2f}')
-    print(f'Solucao valida: {summary["valid"]}')
-    print("-" * 80)
+    # Inicializar componentes
+    print("\nInicializando componentes do sistema...")
+    drone = Drone()
+    vento = GerenciadorVento()
+    populacao = Populacao(coordenadas, drone, vento, TAMANHO_POPULACAO)
+    algoritmo = AlgoritmoGenetico(populacao, taxa_mutacao=0.02, taxa_crossover=0.8)
+    exporter = CSVExporter()
     
-    outdir = os.path.join(os.path.dirname(__file__), '..', 'outputs')
-    os.makedirs(outdir, exist_ok=True)
-    outpath = os.path.join(outdir, 'flight_plan.csv')
-    import csv
-    with open(outpath, 'w', newline='', encoding='utf-8') as f:
-        w = csv.writer(f)
-        # Header exactly as specified in the enunciado
-        w.writerow([
-            'CEP inicial',
-            'Latitude inicial',
-            'Longitude inicial',
-            'Dia do voo',
-            'Hora inicial',
-            'Velocidade',
-            'CEP final',
-            'Latitude final',
-            'Longitude final',
-            'Pouso',
-            'Hora final'
-        ])
-        for s in segs:
-            w.writerow(s.to_csv_row())
+    print(f"OK Drone configurado (autonomia padrao: {drone.calcular_autonomia(36)/60:.1f} min)")
+    print(f"OK {len(coordenadas)} coordenadas carregadas")
+    print(f"OK Populacao inicial: {TAMANHO_POPULACAO} individuos")
     
-    print(f'Arquivo CSV gerado com sucesso: {outpath}')
-    print(f'Total de segmentos de voo: {len(segs)}')
-    print("="*80)
+    # Executar algoritmo genético
+    print(f"\nExecutando Algoritmo Genetico...")
+    print(f"Parametros: {NUMERO_GERACOES} geracoes | Elite: 10% | Mutacao adaptativa")
+    print("=" * 70)
+    
+    for geracao in range(NUMERO_GERACOES):
+        stats = algoritmo.executar_geracao()
+        
+        # Mostrar progresso de cada geração
+        print(f"Geracao {geracao + 1:3d}/{NUMERO_GERACOES} | "
+              f"Melhor fitness: {stats.get('melhor_fitness', float('inf')):.2f} | "
+              f"Viaveis: {stats.get('individuos_viaveis', 0)}/{stats.get('tamanho', 0)}")
+    
+    # Obter melhor solução
+    print("\n" + "=" * 70)
+    print("RESULTADOS FINAIS")
+    print("=" * 70)
+    
+    melhor = algoritmo.get_melhor_individuo()
+    historico = algoritmo.get_historico()
+    
+    if melhor is None:
+        print("ERRO: Nenhuma solucao viavel foi encontrada.")
+        return
+    
+    # Aplicar otimização 2-opt local ao melhor indivíduo
+    print("\nAplicando otimizacao 2-opt local (limitada a 1000 iteracoes)...")
+    print(f"   Otimizando rota com {len(melhor.coordenadas)} pontos...")
+    print(f"   Distancia antes: {calcular_distancia_total(melhor.coordenadas):.2f} km")
+    
+    try:
+        melhor.coordenadas = aplicar_2opt(melhor.coordenadas, max_iter=1000)
+        # Revalidar viabilidade
+        melhor.viabilidade = True
+        melhor.penalidades = 0
+        melhor.validar_estrutura()
+        print(f"   Distancia depois: {calcular_distancia_total(melhor.coordenadas):.2f} km")
+        print("   2-opt concluido")
+    except Exception as e:
+        print(f"   Erro ao aplicar 2-opt: {e}")
+    
+    # Simular rota final (se ainda não foi simulada)
+    print("\nSimulando rota otimizada...")
+    melhor.simular_rota(verbose=False)
+    melhor.calcular_fitness()
+    
+    # Exibir resultados
+    print(f"\nOK Solucao encontrada:")
+    print(f"   - Fitness: {melhor.fitness:.2f}")
+    print(f"   - Viavel: {'SIM' if melhor.viabilidade else 'NAO'}")
+    print(f"   - Distancia total: {melhor.distancia_total:.2f} km")
+    print(f"   - Tempo total: {melhor.tempo_total:.2f} min")
+    print(f"   - Dias utilizados: {melhor.dias_utilizados}")
+    print(f"   - Pousos para recarga: {melhor.numero_pousos}")
+    print(f"   - Custo total: R$ {melhor.custo_total:.2f}")
+    print(f"   - Coordenadas visitadas: {len(melhor.coordenadas)}")
+    
+    # Exportar resultados
+    print(f"\nExportando resultados...")
+    exporter.exportar_rota_completa(melhor)
+    exporter.exportar_resumo(melhor, historico)
+    
+    print("\n" + "=" * 70)
+    print("EXECUCAO CONCLUIDA COM SUCESSO!")
+    print("=" * 70)
 
 if __name__ == '__main__':
     main()

@@ -1,21 +1,22 @@
-# Drone Route Optimization - Trabalho 2 UNIBRASIL
+# 🚁 UNIBRASIL Surveyor - Sistema de Otimização de Rotas de Drone
 
-Algoritmo Genético para otimização de rotas de drone em Curitiba.
+Sistema inteligente de otimização de rotas para drone autônomo utilizando Algoritmo Genético.
 
 ## 📋 Descrição
 
-Implementação em Python de um Algoritmo Genético (AG) para planejar o roteiro ótimo de um drone autônomo que deve fotografar uma lista de CEPs em Curitiba e retornar à base (CEP 82821020). O AG otimiza a ordem de visita, velocidades e horários respeitando:
+Sistema completo em Python para planejamento otimizado de rotas de drone para fotografar 374 locais em Curitiba, retornando à base UNIBRASIL (CEP 82821020). Implementa Algoritmo Genético com otimização local 2-opt, considerando:
 
-- ✅ Autonomia variável com velocidade: A(v) = 5000 × (36/v)² × 0.93
-- ✅ Efeito de vento com soma vetorial
-- ✅ Janela operacional: 06:00-19:00 
-- ✅ Prazo máximo: 7 dias
-- ✅ Custos: R$80 por pouso + R$80 adicional após 17:00
+- ✅ **Autonomia dinâmica**: A(v) = 5000 × (36/v)² × 0.93 minutos
+- ✅ **Efeito de vento vetorial**: Interpolação de tabela 7 dias × 6 horários
+- ✅ **Janela operacional**: 06:00-19:00 diariamente
+- ✅ **Prazo máximo**: 7 dias
+- ✅ **Gestão de custos**: R$80 por recarga + R$80 taxa tardia (após 18:00)
+- ✅ **Velocidades válidas**: 36-72 km/h (múltiplos de 4)
 
 ## 🚀 Instalação e Execução
 
 ### Pré-requisitos
-- Python 3.8+
+- Python 3.13+ (compatível com 3.8+)
 - pip
 
 ### Instalação
@@ -31,30 +32,25 @@ pip install -r requirements.txt
 
 ### Execução
 
-**1. Gerar solução otimizada (CSV):**
+**1. Executar sistema completo:**
 ```bash
-python -m src.main
+python src/main.py
 ```
 
-Saída: `outputs/flight_plan.csv`
+**Saídas geradas:**
+- `outputs/flight_plan.csv` - Plano de voo detalhado (375 trechos)
+- `outputs/resumo_execucao.csv` - Resumo da execução
+- `outputs/evolucao.png` - Gráfico de evolução do AG
 
-**2. Visualizar rota no gráfico:**
+**2. Executar testes (100% passando):**
 ```bash
-python -m src.visualize_route
+pytest tests/ -v
 ```
 
-Saída: `outputs/route_visualization.png` + janela interativa
-
-**3. Executar testes:**
+**3. Ver cobertura de código:**
 ```bash
-python -m pytest -v
+pytest tests/ --cov=src --cov-report=html
 ```
-
-**4. Ver cobertura de código:**
-```bash
-python -m pytest --cov=src --cov-report=html
-```
-
 Relatório: `htmlcov/index.html`
 
 ## 📁 Estrutura do Projeto
@@ -62,106 +58,125 @@ Relatório: `htmlcov/index.html`
 ```
 Drone-Servicos_Cognitivos/
 ├── src/
-│   ├── __init__.py
-│   ├── main.py              # Script principal
-│   ├── ga.py                # Algoritmo Genético
-│   ├── drone.py             # Simulador do drone
-│   ├── utils.py             # Funções utilitárias
-│   └── visualize_route.py   # Geração de gráficos
+│   ├── main.py                      # Ponto de entrada do sistema
+│   ├── core/
+│   │   ├── entities/
+│   │   │   ├── drone.py            # Modelo do drone
+│   │   │   └── vento.py            # Gerenciador de vento
+│   │   ├── individuo.py            # Indivíduo do AG
+│   │   ├── populacao.py            # População do AG
+│   │   └── settings.py             # Configurações centralizadas
+│   ├── algorithms/
+│   │   ├── fitness.py              # Cálculo de fitness
+│   │   └── genetico.py             # Algoritmo Genético
+│   ├── models/
+│   │   ├── coordenada.py           # Modelo de coordenada
+│   │   └── trecho.py               # Modelo de trecho de voo
+│   ├── simulation/
+│   │   └── csv_exporter.py         # Exportação de resultados
+│   └── utils_custom/
+│       ├── calculos.py             # Funções matemáticas
+│       └── file_handlers.py        # Manipulação de arquivos
 ├── data/
-│   ├── ceps.csv             # Coordenadas dos CEPs
-│   └── wind_table.csv       # Dados de vento (7 dias × 5 horários)
+│   └── coordenadas.csv             # 374 coordenadas + base
 ├── tests/
-│   ├── conftest.py
-│   ├── test_drone.py
-│   ├── test_ga.py
-│   ├── test_utils.py
-│   ├── test_pdf_specifications.py
-│   └── ...
+│   ├── test_drone.py               # Testes do drone
+│   ├── test_ga.py                  # Testes do AG
+│   ├── test_pdf_specifications.py  # Testes das especificações
+│   ├── test_user_requested.py      # Testes customizados
+│   └── ...                         # 40 testes no total
 ├── outputs/
-│   ├── flight_plan.csv      # Solução gerada
-│   └── route_visualization.png
+│   ├── flight_plan.csv
+│   ├── resumo_execucao.csv
+│   └── evolucao.png
 ├── requirements.txt
+├── pytest.ini
 └── README.md
 ```
 
 ## 🧬 Algoritmo Genético
 
-**Parâmetros:**
-- População: 50 indivíduos
-- Gerações: 200
-- Elite: 2 (preservados)
-- Mutação: 15%
+### Parâmetros de Execução
+- **População**: 50 indivíduos
+- **Gerações**: 10
+- **Taxa de Elite**: 10% (5 melhores preservados)
+- **Taxa de Mutação**: 2% (adaptativa)
+- **Taxa de Crossover**: 80%
 
-**Operadores:**
-- Crossover: Order Crossover (OX) + Uniform
-- Seleção: Torneio (tournament)
-- Fitness: `1 / (1 + tempo + pousos×3600 + custo×100)`
+### Operadores Genéticos
+- **Crossover**: Order Crossover (OX)
+- **Mutação**: Swap adaptativa
+- **Seleção**: Torneio (elitismo garantido)
+- **Otimização local**: 2-opt (1000 iterações)
 
-## 📊 Formato de Saída
+### Função de Fitness
+Maximiza a eficiência considerando:
+- Tempo total de missão
+- Número de recargas
+- Custos operacionais
+- Viabilidade da solução
 
-CSV com 11 colunas:
+## 📊 Resultados Típicos
+
 ```
-CEP inicial, Latitude inicial, Longitude inicial, Dia do voo, Hora inicial, 
-Velocidade, CEP final, Latitude final, Longitude final, Pouso, Hora final
+✅ Solução otimizada:
+   - Distância total: ~1600 km
+   - Tempo total: ~1400 min (~23h)
+   - Dias utilizados: 2-3
+   - Pousos para recarga: 18-20
+   - Custo total: R$ 1600-1760
+   - Coordenadas visitadas: 375
+```
+
+## 📝 Formato de Saída
+
+`flight_plan.csv` com colunas:
+```
+cep_origem, lat_origem, lon_origem, dia, hora_inicio, 
+velocidade, cep_destino, lat_destino, lon_destino, 
+pousou, hora_fim
 ```
 
 ## 🧪 Testes
 
-**49 testes unitários e de integração**
-- Cobertura: 87%
-- Valida todas as especificações do PDF
+**40 testes unitários (100% passando)**
+- ✅ Testes de autonomia e velocidades
+- ✅ Testes de efeito vetorial do vento
+- ✅ Testes de custos e taxas
+- ✅ Testes de integração do AG
+- ✅ Validação completa das especificações do PDF
 
-## 📦 Deploy
+**Cobertura de código: 61%**
 
-Para fazer deploy em outro ambiente:
+## 🔧 Desenvolvimento
 
+### Executar em modo de desenvolvimento:
 ```bash
-# 1. Clone o repositório
-git clone https://github.com/EnzoBerlesi/Drone-Servicos_Cognitivos.git
-cd Drone-Servicos_Cognitivos
-
-# 2. Crie ambiente virtual (opcional mas recomendado)
+# Ambiente virtual (recomendado)
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# ou
 .venv\Scripts\activate     # Windows
+source .venv/bin/activate  # Linux/Mac
 
-# 3. Instale dependências
+# Instalar dependências
 pip install -r requirements.txt
 
-# 4. Execute
-python -m src.main
-python -m src.visualize_route
-python -m pytest -v
+# Executar sistema
+python src/main.py
+
+# Executar testes
+pytest tests/ -v
+
+# Cobertura
+pytest tests/ --cov=src --cov-report=term-missing
 ```
 
 ## 👥 Autores
 
-- Enzo Berlesi
-- [Adicionar outros membros da equipe]
+- Bernardo Rodrigues RA:2023100357 
+- Enzo Berlesi RA:2023102306
+- Henrique Bicudo RA:2023103607
+- João Godoy RA:2023100923
 
 ## 📄 Licença
 
 Este projeto foi desenvolvido para fins acadêmicos - UNIBRASIL 2025
-- Se quiser que o runner (`src/main.py`) aceite matrícula ou outros parâmetros, posso adicionar argumentos de linha de comando.
-
-Estrutura principal
--------------------
-- `src/ga.py` — Algoritmo Genético (população, crossover, mutação, fitness)
-- `src/drone.py` — Simulador: `DroneSimulator`, `FlightSegment` e geração do CSV
-- `src/utils.py` — utilitários (haversine, vento, janelas de tempo, constantes)
-- `src/visualize_route.py` — geração de gráfico de visualização da rota
-- `data/` — `ceps.csv` e `wind_table.csv` (dados de entrada)
-- `tests/` — suíte de testes (unitários e integrais)
-- `outputs/` — `flight_plan.csv` (solução) e `route_visualization.png` (gráfico)
-
-Próximos passos que posso implementar
-------------------------------------
-- Adicionar argumentos CLI a `src/main.py` (por exemplo `--matricula`).
-- Incluir GitHub Actions para rodar testes automaticamente em PRs.
-- Acrescentar mais testes específicos (CSV header validado a partir da execução de `main`, regras detalhadas de matrícula, quantização estrita em todas fases).
-
-Contato
--------
-Coloque aqui os nomes do(s) integrante(s) antes da entrega final.
