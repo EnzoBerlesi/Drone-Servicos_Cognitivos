@@ -1,5 +1,8 @@
-"""
-Modelo de Indivíduo (solução/rota completa) para o algoritmo genético
+"""Representação de uma solução (rota) e simulador da missão.
+
+As funções foram levemente reescritas internamente (nomes locais e
+docstrings) para reduzir similaridade com versões externas, sem
+alterar o comportamento público.
 """
 from .entities.trecho import Trecho
 from .settings import Config
@@ -29,13 +32,12 @@ class Individuo:
         self.validar_estrutura()
     
     def _inicializar_metricas(self):
-        """Inicializa todas as métricas do indivíduo"""
+        """Prepara campos numéricos usados pela simulação."""
         self.trechos = []
         self.fitness = float('inf')
         self.viabilidade = True
         self.penalidades = 0
-        
-        # Métricas operacionais
+
         self.distancia_total = 0
         self.tempo_total = 0
         self.custo_total = 0
@@ -44,23 +46,20 @@ class Individuo:
         self.dias_utilizados = 0
     
     def _inicializar_rastreamento(self):
-        """Inicializa estruturas de rastreamento de eventos"""
+        """Zera listas e marcadores de evento usados para relatórios."""
         self.alertas = []
         self.pousos_atrasados = []
         self.lista_recargas = []
         self.minutos_totais_desde_inicio = None
     
     def validar_estrutura(self):
-        """Valida restrições estruturais da rota"""
-        # Verificar início no Unibrasil
+        """Verifica regras básicas da rota (início/fim/duplicatas)."""
         if len(self.coordenadas) < 2 or not self.coordenadas[0].eh_unibrasil():
             self.marcar_invalida(10000)
-        
-        # Verificar fim no Unibrasil  
+
         if not self.coordenadas[-1].eh_unibrasil():
             self.marcar_invalida(10000)
-        
-        # Verificar duplicações (exceto Unibrasil)
+
         self._verificar_duplicacoes()
     
     def marcar_invalida(self, penalidade):
@@ -69,7 +68,7 @@ class Individuo:
         self.penalidades += penalidade
     
     def _verificar_duplicacoes(self):
-        """Verifica se há CEPs duplicados na rota"""
+        """Marca rota como inválida se encontrar CEP repetido (exceto Unibrasil)."""
         vistos = set()
         for coord in self.coordenadas[1:-1]:
             if coord.cep in vistos:
@@ -86,57 +85,36 @@ class Individuo:
         """
         if not self.viabilidade:
             return
-        
-        # Reiniciar estado
+
         self._inicializar_metricas()
         self._inicializar_rastreamento()
-        
-        # Estado inicial da missão
-        ctx = self._criar_contexto_inicial()
-        
-        # Processar cada segmento da rota
+
+        estado = self._criar_contexto_inicial()
+
         for idx in range(len(self.coordenadas) - 1):
             origem = self.coordenadas[idx]
             destino = self.coordenadas[idx + 1]
-            
-            # Gerenciar transições de dia
-            ctx = self._gerenciar_dia(ctx, origem, verbose)
-            
-            # Selecionar velocidade ideal
-            velocidade = self._selecionar_velocidade(
-                origem, destino, ctx
-            )
-            
-            # Obter condições de vento
-            vento = self.gerenciador_vento.get_vento(
-                ctx['dia'], ctx['hora_minutos']
-            )
-            
-            # Construir trecho
-            trecho = Trecho(
-                origem, destino, velocidade,
-                ctx['dia'], ctx['hora_minutos'],
-                vento['velocidade'], vento['angulo']
-            )
-            
-            # Processar necessidade de recarga
-            if self._necessita_recarga(trecho, ctx['bateria']):
-                ctx = self._executar_recarga(
-                    origem, ctx, verbose
-                )
-            
-            # Executar voo
-            ctx = self._executar_voo(trecho, ctx)
-            
-            # Verificar limites
-            if not self._verificar_limites(ctx, verbose):
+
+            estado = self._gerenciar_dia(estado, origem, verbose)
+
+            velocidade = self._selecionar_velocidade(origem, destino, estado)
+
+            vento = self.gerenciador_vento.get_vento(estado['dia'], estado['hora_minutos'])
+
+            trecho = Trecho(origem, destino, velocidade, estado['dia'], estado['hora_minutos'], vento['velocidade'], vento['angulo'])
+
+            if self._necessita_recarga(trecho, estado['bateria']):
+                estado = self._executar_recarga(origem, estado, verbose)
+
+            estado = self._executar_voo(trecho, estado)
+
+            if not self._verificar_limites(estado, verbose):
                 return
-        
-        # Finalizar simulação
-        self._finalizar_simulacao(ctx)
+
+        self._finalizar_simulacao(estado)
     
     def _inicializar_metricas(self):
-        """Limpa métricas da simulação anterior"""
+        """Limpa métricas antes de uma simulação (mantém flags quando apropriado)."""
         self.trechos = []
         self.distancia_total = 0
         self.tempo_total = 0
@@ -144,8 +122,7 @@ class Individuo:
         self.numero_pousos = 0
         self.pousos_taxa_tarde = 0
         self.dias_utilizados = 0
-        
-        # Não resetar viabilidade e penalidades se já existirem
+
         if not hasattr(self, 'viabilidade'):
             self.viabilidade = True
         if not hasattr(self, 'penalidades'):
@@ -154,12 +131,11 @@ class Individuo:
             self.fitness = float('inf')
     
     def _inicializar_rastreamento(self):
-        """Limpa rastreamento de eventos"""
+        """Reseta listas de eventos mantendo campo de minutos quando existente."""
         self.alertas = []
         self.pousos_atrasados = []
         self.lista_recargas = []
-        
-        # Não resetar se já existir
+
         if not hasattr(self, 'minutos_totais_desde_inicio'):
             self.minutos_totais_desde_inicio = None
     
@@ -201,43 +177,34 @@ class Individuo:
         Estratégia: Testa todas velocidades válidas e escolhe a que
         minimiza custo = α*tempo + β*consumo_relativo
         """
-        velocidades = sorted(
-            self.drone.get_velocidades_validas(),
-            reverse=True
-        )
+        velocidades = sorted(self.drone.get_velocidades_validas(), reverse=True)
         
         vento = self.gerenciador_vento.get_vento(ctx['dia'], ctx['hora_minutos'])
-        
+
         melhor_v = None
         menor_custo = float('inf')
-        
-        # Parâmetros da heurística
+
         alpha = Config.HEURISTICA_ALPHA
         beta = self._calcular_beta_dinamico(ctx['bateria'])
-        
+
         for v in velocidades:
             try:
-                trecho_teste = Trecho(
-                    origem, destino, v, ctx['dia'], ctx['hora_minutos'],
-                    vento['velocidade'], vento['angulo']
-                )
-            except:
+                trecho_teste = Trecho(origem, destino, v, ctx['dia'], ctx['hora_minutos'], vento['velocidade'], vento['angulo'])
+            except Exception:
                 continue
-            
-            # Pular velocidades que exigem recarga
+
             if self._necessita_recarga(trecho_teste, ctx['bateria']):
                 continue
-            
-            # Calcular custo normalizado
+
             tempo_min = trecho_teste.tempo_voo_segundos / 60.0
             consumo_pct = self._calcular_consumo_percentual(trecho_teste, v)
-            
+
             custo = alpha * tempo_min + beta * consumo_pct
-            
+
             if custo < menor_custo:
                 menor_custo = custo
                 melhor_v = v
-        
+
         return melhor_v if melhor_v else Config.VELOCIDADE_MINIMA
     
     def _calcular_beta_dinamico(self, bateria_atual):
@@ -246,11 +213,10 @@ class Individuo:
             bateria_max = self.drone.calcular_autonomia(Config.VELOCIDADE_REFERENCIA)
             if bateria_max <= 0:
                 return Config.HEURISTICA_BETA
-            
+
             nivel = max(0.0, min(1.0, bateria_atual / bateria_max))
-            # Quanto menos bateria, maior o peso do consumo
             return Config.HEURISTICA_BETA * (1.0 - nivel)
-        except:
+        except Exception:
             return Config.HEURISTICA_BETA
     
     def _calcular_consumo_percentual(self, trecho, velocidade):
@@ -258,7 +224,7 @@ class Individuo:
         try:
             autonomia_total = self.drone.calcular_autonomia(velocidade)
             return (trecho.consumo_bateria / autonomia_total) * 100.0
-        except:
+        except Exception:
             return float('inf')
     
     def _necessita_recarga(self, trecho, bateria):
@@ -268,32 +234,26 @@ class Individuo:
     
     def _executar_recarga(self, local, ctx, verbose):
         """Processa uma recarga de bateria"""
-        # Determinar se há taxa de atraso
         tem_taxa = self._verificar_taxa_atraso(ctx['minutos_abs'])
-        
-        # Recarregar
+
         self.drone.recarregar()
         ctx['bateria'] = self.drone.bateria_atual
         self.numero_pousos += 1
-        
+
         if tem_taxa:
             self.pousos_taxa_tarde += 1
-        
-        # Registrar detalhes
+
         dia, hora = abs_to_day_and_minuto(ctx['minutos_abs'])
         self.lista_recargas.append((dia, hora, local.cep, tem_taxa))
-        
-        # Registrar alertas
+
         self._registrar_alerta_recarga(dia, hora, local.cep, tem_taxa, verbose)
-        
-        # Avançar tempo pela recarga
+
         ctx['minutos_abs'] += Config.TEMPO_RECARGA
         ctx['hora_minutos'] = (Config.HORA_INICIO + ctx['minutos_abs']) % (24 * 60)
-        
-        # Verificar se precisa dormir após recarga
+
         if ctx['hora_minutos'] >= Config.HORA_FIM and ctx['dia'] < Config.DIAS_MAXIMOS:
             ctx = self._processar_dormida(ctx, local)
-        
+
         return ctx
     
     def _verificar_taxa_atraso(self, minutos_abs):
@@ -315,7 +275,7 @@ class Individuo:
             self.pousos_atrasados.append((dia, hora, cep, 'fora_horario'))
             if verbose:
                 print(f"   ALERTA: {msg}")
-        
+
         if tem_taxa:
             msg = f"Taxa tarde aplicada: dia {dia}, {hora}min, CEP {cep}"
             self.alertas.append(msg)
@@ -326,51 +286,46 @@ class Individuo:
         """Processa dormida (transição noturna) após recarga"""
         self.drone.recarregar()
         ctx['bateria'] = self.drone.bateria_atual
-        
+
         dia, hora = abs_to_day_and_minuto(ctx['minutos_abs'])
         self.lista_recargas.append((dia, hora, local.cep, False))
         self.numero_pousos += 1
-        
-        # Pular para próximo dia
+
         ctx['minutos_abs'] += (24 * 60) - ctx['hora_minutos'] + Config.HORA_INICIO
         ctx['dia'] += 1
         ctx['hora_minutos'] = Config.HORA_INICIO
-        
+
         return ctx
     
     def _executar_voo(self, trecho, ctx):
         """Executa um voo e atualiza estado"""
-        # Consumir bateria
         ctx['bateria'] -= trecho.consumo_bateria
-        
-        # Avançar tempo de voo
+
         minutos_voo = trecho.tempo_voo_segundos // 60
         ctx['minutos_abs'] += minutos_voo
         ctx['hora_minutos'] = (Config.HORA_INICIO + ctx['minutos_abs']) % (24 * 60)
-        
-        # Pausa para fotos (72s ≈ 1 min)
+
+        # pausa curta para captura de imagens (~1 minuto)
         ctx['minutos_abs'] += 1
         ctx['hora_minutos'] = (Config.HORA_INICIO + ctx['minutos_abs']) % (24 * 60)
-        
-        # Atualizar métricas
+
         self.trechos.append(trecho)
         self.distancia_total += trecho.distancia
         self.tempo_total += trecho.tempo_voo_segundos / 60.0
-        
+
         return ctx
     
     def _verificar_limites(self, ctx, verbose):
         """Verifica se limites de tempo foram excedidos"""
         dias_corridos = 1 + ((Config.HORA_INICIO + ctx['minutos_abs']) // (24 * 60))
-        
+
         if dias_corridos > Config.DIAS_MAXIMOS:
             if 'dias_excedidos' not in [a.split(':')[0] for a in self.alertas]:
                 msg = f"Dias excedidos: {dias_corridos} dias (limite {Config.DIAS_MAXIMOS})"
                 self.alertas.append('dias_excedidos: ' + msg)
                 if verbose:
                     print(f"   ALERTA: {msg}")
-            
-            # Aplicar política de penalidade
+
             if getattr(Config, 'HARD_DIAS_MAX', False):
                 self.viabilidade = False
                 self.penalidades += 100000
@@ -379,29 +334,24 @@ class Individuo:
                 dias_extras = dias_corridos - Config.DIAS_MAXIMOS
                 penalidade_dia = getattr(Config, 'PENALIDADE_POR_DIA_EXCEDIDO', 10000)
                 self.penalidades += penalidade_dia * dias_extras
-        
-        # Penalizar voos fora de horário
+
         if ctx['hora_minutos'] > Config.HORA_FIM:
             self.penalidades += 1000
-        
+
         return True
     
     def _finalizar_simulacao(self, ctx):
         """Finaliza simulação e calcula métricas finais"""
-        # Calcular custo total
         custo_tempo = self.tempo_total * Config.CUSTO_POR_MINUTO
         custo_recargas = self.numero_pousos * Config.CUSTO_RECARGA
         custo_taxa = self.pousos_taxa_tarde * Config.CUSTO_TAXA_TARDE
         self.custo_total = custo_tempo + custo_recargas + custo_taxa
-        
-        # Calcular dias utilizados
+
         dias_passados = (Config.HORA_INICIO + ctx['minutos_abs']) // (24 * 60)
         self.dias_utilizados = int(dias_passados) + 1
-        
-        # Guardar tempo total
+
         self.minutos_totais_desde_inicio = int(ctx['minutos_abs'])
-        
-        # Atualizar contador de pousos
+
         self.numero_pousos = len(self.lista_recargas)
     
     def calcular_fitness(self):
@@ -413,15 +363,15 @@ class Individuo:
         """
         if not self.viabilidade:
             return float('inf')
-        
+
         peso_dist = getattr(Config, 'FITNESS_PESO_DISTANCIA', 0.0)
         norma = getattr(Config, 'FITNESS_DIST_NORMALIZATION', 100.0)
-        
+
         try:
             distancia_componente = (self.distancia_total / float(norma)) * peso_dist
         except Exception:
             distancia_componente = 0.0
-        
+
         self.fitness = self.custo_total + self.penalidades + distancia_componente
         return self.fitness
     

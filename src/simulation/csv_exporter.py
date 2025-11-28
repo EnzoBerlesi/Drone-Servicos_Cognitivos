@@ -104,8 +104,10 @@ class CSVExporter:
             writer.writerow(['Data execução', datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
             writer.writerow(['Total pontos', len(individuo.coordenadas)])
             writer.writerow(['Distância total (km)', f"{individuo.distancia_total:.2f}"])
-            
-            # Tempo total
+
+            # Tempo de voo (somente voo) e tempo total da missão (inclui pausas/recargas/dormidas)
+            writer.writerow(['Tempo de voo (min)', f"{individuo.tempo_total:.2f}"])
+
             minutos_missao = getattr(individuo, 'minutos_totais_desde_inicio', None)
             if minutos_missao is None:
                 num_recargas = len(getattr(individuo, 'lista_recargas', []))
@@ -113,7 +115,7 @@ class CSVExporter:
                 num_trechos = len(getattr(individuo, 'trechos', []))
                 tempo_parada_min = (num_trechos * getattr(Config, 'TEMPO_PARADA', 0)) / 60.0
                 minutos_missao = individuo.tempo_total + tempo_recargas_min + tempo_parada_min
-            
+
             writer.writerow(['Tempo total missão (min)', f"{float(minutos_missao):.2f}"])
             
             # Custos
@@ -289,7 +291,7 @@ class CSVExporter:
             num_coords = len(individuo.coordenadas) if hasattr(individuo, 'coordenadas') else len(individuo.trechos) + 1
             titulo = (f'Rota Otimizada - {num_coords} CEPs em Curitiba\n'
                      f'Distância Total: {individuo.distancia_total:.2f} km | '
-                     f'Tempo: {individuo.tempo_total/60:.0f} min | '
+                     f'Tempo: {individuo.tempo_total:.0f} min | '
                      f'Dias: {individuo.dias_utilizados} | '
                      f'Recargas: {len(individuo.lista_recargas)} | '
                      f'Custo: R$ {individuo.custo_total:.2f}')

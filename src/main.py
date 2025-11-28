@@ -149,7 +149,18 @@ def main():
     print(f"   - Fitness: {melhor.fitness:.2f}")
     print(f"   - Viavel: {'SIM' if melhor.viabilidade else 'NAO'}")
     print(f"   - Distancia total: {melhor.distancia_total:.2f} km")
-    print(f"   - Tempo total: {melhor.tempo_total:.2f} min")
+    print(f"   - Tempo total (voo): {melhor.tempo_total:.2f} min")
+
+    # Tempo total da missão (inclui pausas/recargas/dormidas)
+    minutos_missao = getattr(melhor, 'minutos_totais_desde_inicio', None)
+    if minutos_missao is None:
+        num_recargas = len(getattr(melhor, 'lista_recargas', []))
+        tempo_recargas_min = num_recargas * getattr(Config, 'TEMPO_RECARGA', 0)
+        num_trechos = len(getattr(melhor, 'trechos', []))
+        tempo_parada_min = (num_trechos * getattr(Config, 'TEMPO_PARADA', 0)) / 60.0
+        minutos_missao = melhor.tempo_total + tempo_recargas_min + tempo_parada_min
+
+    print(f"   - Tempo total missão (min): {float(minutos_missao):.2f}")
     print(f"   - Dias utilizados: {melhor.dias_utilizados}")
     print(f"   - Pousos para recarga: {melhor.numero_pousos}")
     print(f"   - Custo total: R$ {melhor.custo_total:.2f}")
