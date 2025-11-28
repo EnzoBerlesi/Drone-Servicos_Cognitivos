@@ -4,6 +4,7 @@ Exportador de resultados em formato CSV
 import os
 import csv
 from datetime import datetime
+import matplotlib.pyplot as plt
 from ..core.settings import Config
 from ..utils_custom.time_utils import formatar_hora_csv
 
@@ -241,3 +242,88 @@ class CSVExporter:
             print("   AVISO: matplotlib nao encontrado - instale com 'pip install matplotlib'")
         except Exception as e:
             print(f"   AVISO: Erro ao gerar grafico: {e}")
+    
+    def gerar_mapa_rota(self, individuo):
+        """
+        Gera visualização da rota otimizada no mapa de Curitiba.
+        
+        Args:
+            individuo: Melhor indivíduo encontrado
+        
+        Returns:
+            str: Caminho do arquivo criado
+        """
+        try:
+            # Coletar coordenadas da rota
+            lats = []
+            lons = []
+            
+            for trecho in individuo.trechos:
+                lats.append(trecho.origem.latitude)
+                lons.append(trecho.origem.longitude)
+            
+            # Adicionar última coordenada (destino final)
+            if individuo.trechos:
+                ultimo = individuo.trechos[-1]
+                lats.append(ultimo.destino.latitude)
+                lons.append(ultimo.destino.longitude)
+            
+            # Criar figura
+            fig, ax = plt.subplots(figsize=(14, 11))
+            
+            # Plotar rota completa (azul)
+            ax.plot(lons, lats, 'o-', color='#3b82f6', markersize=5, 
+                   linewidth=1.2, alpha=0.7, label='Rota otimizada', zorder=2)
+            
+            # Destacar Unibrasil (vermelho) - início e fim
+            if lons and lats:
+                ax.plot(lons[0], lats[0], 'o', color='#ef4444', markersize=18, 
+                       label='Unibrasil (início/fim)', zorder=10, 
+                       markeredgecolor='white', markeredgewidth=2)
+            
+            # Configurar eixos
+            ax.set_xlabel('Longitude', fontsize=13, fontweight='bold')
+            ax.set_ylabel('Latitude', fontsize=13, fontweight='bold')
+            
+            # Título com informações principais
+            num_coords = len(individuo.coordenadas) if hasattr(individuo, 'coordenadas') else len(individuo.trechos) + 1
+            titulo = (f'Rota Otimizada - {num_coords} CEPs em Curitiba\n'
+                     f'Distância Total: {individuo.distancia_total:.2f} km | '
+                     f'Tempo: {individuo.tempo_total/60:.0f} min | '
+                     f'Dias: {individuo.dias_utilizados} | '
+                     f'Recargas: {len(individuo.lista_recargas)} | '
+                     f'Custo: R$ {individuo.custo_total:.2f}')
+            ax.set_title(titulo, fontsize=14, fontweight='bold', pad=20)
+            
+            # Grid e estilo
+            ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
+            ax.set_facecolor('#f8f9fa')
+            fig.patch.set_facecolor('white')
+            
+            # Legenda
+            ax.legend(loc='upper right', fontsize=11, framealpha=0.95, 
+                     edgecolor='gray', fancybox=True, shadow=True)
+            
+            # Ajustar limites para dar margem
+            if lons and lats:
+                lon_margin = (max(lons) - min(lons)) * 0.05
+                lat_margin = (max(lats) - min(lats)) * 0.05
+                ax.set_xlim(min(lons) - lon_margin, max(lons) + lon_margin)
+                ax.set_ylim(min(lats) - lat_margin, max(lats) + lat_margin)
+            
+            plt.tight_layout()
+            
+            # Salvar
+            caminho_mapa = os.path.join(self.diretorio_saida, 'mapa_rota.png')
+            plt.savefig(caminho_mapa, dpi=150, bbox_inches='tight', facecolor='white')
+            plt.close(fig)
+            
+            print(f"OK Mapa da rota salvo: {caminho_mapa}")
+            return caminho_mapa
+            
+        except ImportError:
+            print("   AVISO: matplotlib nao encontrado - instale com 'pip install matplotlib'")
+            return None
+        except Exception as e:
+            print(f"   AVISO: Erro ao gerar mapa da rota: {e}")
+            return None

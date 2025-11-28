@@ -159,6 +159,7 @@ def main():
     print(f"\nExportando resultados...")
     exporter.exportar_rota_completa(melhor)
     exporter.exportar_resumo(melhor, historico)
+    exporter.gerar_mapa_rota(melhor)
     
     print("\n" + "=" * 70)
     print("EXECUCAO CONCLUIDA COM SUCESSO!")

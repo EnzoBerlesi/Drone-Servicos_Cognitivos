@@ -6,3 +6,4 @@ env/
 coverage/
 images/
 .venv_linux/
+*.pdf
